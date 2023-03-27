@@ -1,0 +1,64 @@
+pipeline {
+    agent {
+        label 'windows'
+    }
+    environment {
+        dotnet = 'C:\\Program Files\\dotnet\\dotnet.exe'
+        credentialsId = 'credID'
+        solutionName = 'solutionname.sln'
+        url = 'gitUrl'
+        prod_publishLocation = 'prodlocation'
+        test_publishLocation = 'testlocation'
+        sitename = 'jenkins'
+        test_sitename = 'test.jenkins'
+    }
+    stages {
+        stage('Checkout Stage') {
+            steps {
+                echo "${env.BRANCH_NAME}"
+                git credentialsId: "${env.credentialsId}", url: "${env.url}", branch: "${env.BRANCH_NAME}"
+            }
+        }
+        stage('Dev Stage') {
+                steps {
+                    script {
+                        echo "${sitename}"
+                        echo "${test_sitename}"
+                        if (env.BRANCH_NAME == 'dev') {
+                        echo 'Dev Stage is starting...%%'
+                        bat "dotnet build \"%WORKSPACE%\\${env.solutionName}\" --configuration Release"
+                        bat "powershell -Command 'Stop-Website -Name \"${test_sitename}\"'"
+                        bat "dotnet publish \"%WORKSPACE%\\${env.solutionName}\" -c Release -r win-x64 --output \"${test_publishLocation}\" /p:Platform=\"Any CPU\" /p:DeployOnBuild=true /m"
+                        bat "powershell -Command 'Start-Website -Name \"${test_sitename}\"'"
+                        echo 'Dev Stage is completed successfully.'
+                        }
+                    }
+                }
+        }
+        stage('Prod Stage') {
+                steps {
+                    script {
+                        if (env.BRANCH_NAME == 'main') {
+                        echo 'Main Stage is starting...%%'
+                        bat "dotnet build \"%WORKSPACE%\\${env.solutionName}\" --configuration Release"
+                        timeout(time: 1, unit: 'MINUTES') {
+                                    input message: 'Do you want to approve the deployment?', ok: 'Yes'
+                        }
+                        timeout(time: 1, unit: 'MINUTES') {
+                            copyArtifacts(projectName: 'previous-build-job-name',
+                                     filter: 'output/*',
+                                     fingerprintArtifacts: true,
+                                     flatten: true,
+                                     target: "${prod_publishLocation}/previous-build")
+
+                            bat "powershell -Command 'Stop-Website -Name \"${sitename}\"'"
+                            bat "dotnet publish \"%WORKSPACE%\\${env.solutionName}\" -c Release -r win-x64 --output \"${prod_publishLocation}\" /p:Platform=\"Any CPU\" /p:DeployOnBuild=true /m"
+                            bat "powershell -Command 'Start-Website -Name \"${sitename}\"'"
+                        }
+                        echo 'Main Stage is completed successfully.'
+                        }
+                    }
+                }
+        }
+    }
+}
